@@ -1,0 +1,9 @@
+/target
+*.csv
+*.arrow
+*.parquet
+*.py
+*.txt
+*.tsv
+
+.idea/
