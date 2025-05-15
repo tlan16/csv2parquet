@@ -70,7 +70,8 @@ mod test_read_schema_from_json_file {
         "#;
         write!(temp_file, "{}", schema_json).unwrap();
 
-        let actual = read_schema_from_schema_file_in_json(temp_file.path().to_str().unwrap().to_string());
+        let actual =
+            read_schema_from_schema_file_in_json(temp_file.path().to_str().unwrap().to_string());
         let expected = Schema::new(vec![
             arrow_schema::Field::new("id", arrow_schema::DataType::Int32, false),
             arrow_schema::Field::new("name", arrow_schema::DataType::Utf8, true),

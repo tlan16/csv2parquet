@@ -241,7 +241,6 @@ fn csv_to_parquet(options: Options) -> Result<(), ParquetError> {
         props = props.set_created_by(created_by);
     }
 
-
     let mut writer = ArrowWriter::try_new(output, reader.schema(), Some(props.build()))?;
 
     for batch in reader {
@@ -256,7 +255,6 @@ fn csv_to_parquet(options: Options) -> Result<(), ParquetError> {
         Err(error) => Err(error),
     }
 }
-
 
 #[cfg(test)]
 mod test_csv_to_parquet {
@@ -296,16 +294,52 @@ mod test_csv_to_parquet {
 
         csv_to_parquet(options).unwrap();
 
-        let output_file_size = output_file.path().metadata().expect("Failed to get file metadata").len();
+        let output_file_size = output_file
+            .path()
+            .metadata()
+            .expect("Failed to get file metadata")
+            .len();
         assert!(output_file_size > 0, "Output file is empty");
 
-        let output_file_handle = File::open(output_file.path()).expect("Failed to open output file");
-        let builder = ParquetRecordBatchReaderBuilder::try_new(output_file_handle).expect("Failed to create ParquetRecordBatchReaderBuilder");
-        let mut reader = builder.build().expect("Failed to build ParquetRecordBatchReader");
+        let output_file_handle =
+            File::open(output_file.path()).expect("Failed to open output file");
+        let builder = ParquetRecordBatchReaderBuilder::try_new(output_file_handle)
+            .expect("Failed to create ParquetRecordBatchReaderBuilder");
+        let mut reader = builder
+            .build()
+            .expect("Failed to build ParquetRecordBatchReader");
         let output_content = reader.next().unwrap().expect("Failed to read record batch");
-        assert_eq!(output_content.num_rows(), 2, "Number of rows in output file is incorrect");
-        assert_eq!(output_content.column(0).as_any().downcast_ref::<arrow::array::Int64Array>().unwrap().values(), &[1, 2]);
-        assert_eq!(output_content.column(1).as_any().downcast_ref::<arrow::array::StringArray>().unwrap().value(0), "Alice");
-        assert_eq!(output_content.column(1).as_any().downcast_ref::<arrow::array::StringArray>().unwrap().value(1), "Bob");
+        assert_eq!(
+            output_content.num_rows(),
+            2,
+            "Number of rows in output file is incorrect"
+        );
+        assert_eq!(
+            output_content
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow::array::Int64Array>()
+                .unwrap()
+                .values(),
+            &[1, 2]
+        );
+        assert_eq!(
+            output_content
+                .column(1)
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap()
+                .value(0),
+            "Alice"
+        );
+        assert_eq!(
+            output_content
+                .column(1)
+                .as_any()
+                .downcast_ref::<arrow::array::StringArray>()
+                .unwrap()
+                .value(1),
+            "Bob"
+        );
     }
 }
