@@ -1,5 +1,7 @@
+---
 name: Release Binaries
 
+# yamllint disable-line rule:truthy
 on:
   release:
     types: [published]

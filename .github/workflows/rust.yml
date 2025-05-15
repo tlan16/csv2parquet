@@ -1,5 +1,7 @@
+---
 name: Rust
 
+# yamllint disable-line rule:truthy
 on:
   workflow_dispatch:
   push:
@@ -10,12 +12,17 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+concurrency:
+  group: build-and-test
+  cancel-in-progress: true
+
 jobs:
-  qa:
+  build-and-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        BUILD_TARGET: [ release ] # refers to a cargo profile
+        BUILD_TARGET:
+          - release
     outputs:
       release_built: ${{ steps.set-output.outputs.release_built }}
     steps:
