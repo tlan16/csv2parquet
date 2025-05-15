@@ -1,5 +1,5 @@
 [package]
-name = "csv2parquet"
+name = "csv2parquet_mod"
 version = "0.6.2"
 authors = ["Frank Lan <franklan118@gmail.com>", "Dominik Moritz <domoritz@cmu.edu>"]
 license = "MIT/Apache-2.0"
