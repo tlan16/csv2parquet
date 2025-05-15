@@ -1,5 +1,9 @@
+mod schema;
+
+use crate::schema::{infer_scheam_from_data_file, read_schema_from_schema_file_in_json};
 use arrow::csv::ReaderBuilder;
 use clap::{Parser, ValueHint};
+use parquet::basic::{BrotliLevel, GzipLevel, ZstdLevel};
 use parquet::{
     arrow::ArrowWriter,
     basic::{Compression, Encoding},
@@ -27,7 +31,6 @@ enum ParquetCompression {
 enum ParquetEncoding {
     PLAIN,
     RLE,
-    BIT_PACKED,
     DELTA_BINARY_PACKED,
     DELTA_LENGTH_BYTE_ARRAY,
     DELTA_BYTE_ARRAY,
@@ -43,8 +46,8 @@ enum ParquetEnabledStatistics {
 }
 
 #[derive(Parser)]
-#[clap(version = env!("CARGO_PKG_VERSION"), author = "Dominik Moritz <domoritz@cmu.edu>")]
-struct Opts {
+#[clap(version = env!("CARGO_PKG_VERSION"), author = "Frank Lan <franklan118@gmail.com>")]
+struct Options {
     /// Input CSV file.
     #[clap(name = "CSV", value_parser, value_hint = ValueHint::AnyPath)]
     input: PathBuf,
@@ -105,10 +108,6 @@ struct Opts {
     #[clap(long, value_enum)]
     statistics: Option<ParquetEnabledStatistics>,
 
-    /// Sets max statistics size for any column. Applicable only if statistics are enabled.
-    #[clap(long)]
-    max_statistics_size: Option<usize>,
-
     /// Print the schema to stderr.
     #[clap(short, long)]
     print_schema: bool,
@@ -119,67 +118,58 @@ struct Opts {
 }
 
 fn main() -> Result<(), ParquetError> {
-    let opts: Opts = Opts::parse();
+    let opts: Options = Options::parse();
+    csv_to_parquet(opts)
+}
 
-    let mut input = File::open(opts.input)?;
+fn csv_to_parquet(options: Options) -> Result<(), ParquetError> {
+    let input = File::open(options.input.clone())?;
 
-    let schema = match opts.schema_file {
+    let schema = match options.schema_file {
         Some(schema_def_file_path) => {
-            let schema_file = match File::open(&schema_def_file_path) {
-                Ok(file) => Ok(file),
-                Err(error) => Err(ParquetError::General(format!(
-                    "Error opening schema file: {:?}, message: {}",
-                    schema_def_file_path, error
-                ))),
-            }?;
-            let schema: Result<arrow::datatypes::Schema, serde_json::Error> =
-                serde_json::from_reader(schema_file);
-            match schema {
-                Ok(schema) => Ok(schema),
-                Err(err) => Err(ParquetError::General(format!(
-                    "Error reading schema json: {}",
-                    err
-                ))),
-            }
+            let schema_file_path = schema_def_file_path
+                .to_str()
+                .expect("Failed to convert path to string")
+                .to_string();
+            read_schema_from_schema_file_in_json(schema_file_path)
         }
         _ => {
-            match arrow::csv::reader::infer_file_schema(
-                &mut input,
-                opts.delimiter as u8,
-                opts.max_read_records,
-                opts.header.unwrap_or(true),
-            ) {
-                Ok((schema, _inferred_has_header)) => Ok(schema),
-                Err(error) => Err(ParquetError::General(format!(
-                    "Error inferring schema: {}",
-                    error
-                ))),
-            }
+            let input_file_path = options
+                .input
+                .clone()
+                .to_str()
+                .expect("Failed to convert path to string")
+                .to_string();
+            infer_scheam_from_data_file(
+                input_file_path,
+                options.delimiter as u8,
+                options.max_read_records,
+                options.header.unwrap_or(true),
+            )
         }
-    }?;
+    };
 
-    if opts.print_schema || opts.dry {
+    if options.print_schema || options.dry {
         let json = serde_json::to_string_pretty(&schema).unwrap();
         eprintln!("Schema:");
         println!("{}", json);
-        if opts.dry {
+        if options.dry {
             return Ok(());
         }
     }
 
     let schema_ref = Arc::new(schema);
-    let builder = ReaderBuilder::new()
-        .has_header(opts.header.unwrap_or(true))
-        .with_delimiter(opts.delimiter as u8)
-        .with_schema(schema_ref);
+    let builder = ReaderBuilder::new(schema_ref)
+        .with_header(options.header.unwrap_or(true))
+        .with_delimiter(options.delimiter as u8);
 
     let reader = builder.build(input)?;
 
-    let output = File::create(opts.output)?;
+    let output = File::create(options.output)?;
 
-    let mut props = WriterProperties::builder().set_dictionary_enabled(opts.dictionary);
+    let mut props = WriterProperties::builder().set_dictionary_enabled(options.dictionary);
 
-    if let Some(statistics) = opts.statistics {
+    if let Some(statistics) = options.statistics {
         let statistics = match statistics {
             ParquetEnabledStatistics::Chunk => EnabledStatistics::Chunk,
             ParquetEnabledStatistics::Page => EnabledStatistics::Page,
@@ -189,25 +179,35 @@ fn main() -> Result<(), ParquetError> {
         props = props.set_statistics_enabled(statistics);
     }
 
-    if let Some(compression) = opts.compression {
+    if let Some(compression) = options.compression {
         let compression = match compression {
             ParquetCompression::UNCOMPRESSED => Compression::UNCOMPRESSED,
             ParquetCompression::SNAPPY => Compression::SNAPPY,
-            ParquetCompression::GZIP => Compression::GZIP,
+            ParquetCompression::GZIP => {
+                let gzip_level: GzipLevel =
+                    GzipLevel::try_new(9).expect("Failed to create GzipLevel");
+                Compression::GZIP(gzip_level)
+            }
             ParquetCompression::LZO => Compression::LZO,
-            ParquetCompression::BROTLI => Compression::BROTLI,
+            ParquetCompression::BROTLI => {
+                let brotli_level: BrotliLevel =
+                    BrotliLevel::try_new(11).expect("Failed to create BrotliLevel");
+                Compression::BROTLI(brotli_level)
+            }
             ParquetCompression::LZ4 => Compression::LZ4,
-            ParquetCompression::ZSTD => Compression::ZSTD,
+            ParquetCompression::ZSTD => {
+                let zstd_level = ZstdLevel::try_new(22).expect("Failed to create ZstdLevel");
+                Compression::ZSTD(zstd_level)
+            }
         };
 
         props = props.set_compression(compression);
     }
 
-    if let Some(encoding) = opts.encoding {
+    if let Some(encoding) = options.encoding {
         let encoding = match encoding {
             ParquetEncoding::PLAIN => Encoding::PLAIN,
             ParquetEncoding::RLE => Encoding::RLE,
-            ParquetEncoding::BIT_PACKED => Encoding::BIT_PACKED,
             ParquetEncoding::DELTA_BINARY_PACKED => Encoding::DELTA_BINARY_PACKED,
             ParquetEncoding::DELTA_LENGTH_BYTE_ARRAY => Encoding::DELTA_LENGTH_BYTE_ARRAY,
             ParquetEncoding::DELTA_BYTE_ARRAY => Encoding::DELTA_BYTE_ARRAY,
@@ -217,33 +217,30 @@ fn main() -> Result<(), ParquetError> {
         props = props.set_encoding(encoding);
     }
 
-    if let Some(size) = opts.write_batch_size {
+    if let Some(size) = options.write_batch_size {
         props = props.set_write_batch_size(size);
     }
 
-    if let Some(size) = opts.data_pagesize_limit {
-        props = props.set_data_pagesize_limit(size);
+    if let Some(size) = options.data_pagesize_limit {
+        props = props.set_data_page_size_limit(size);
     }
 
-    if let Some(size) = opts.dictionary_pagesize_limit {
-        props = props.set_dictionary_pagesize_limit(size);
+    if let Some(size) = options.dictionary_pagesize_limit {
+        props = props.set_dictionary_page_size_limit(size);
     }
 
-    if let Some(size) = opts.dictionary_pagesize_limit {
-        props = props.set_dictionary_pagesize_limit(size);
+    if let Some(size) = options.dictionary_pagesize_limit {
+        props = props.set_dictionary_page_size_limit(size);
     }
 
-    if let Some(size) = opts.max_row_group_size {
+    if let Some(size) = options.max_row_group_size {
         props = props.set_max_row_group_size(size);
     }
 
-    if let Some(created_by) = opts.created_by {
+    if let Some(created_by) = options.created_by {
         props = props.set_created_by(created_by);
     }
 
-    if let Some(size) = opts.max_statistics_size {
-        props = props.set_max_statistics_size(size);
-    }
 
     let mut writer = ArrowWriter::try_new(output, reader.schema(), Some(props.build()))?;
 
@@ -257,5 +254,58 @@ fn main() -> Result<(), ParquetError> {
     match writer.close() {
         Ok(_) => Ok(()),
         Err(error) => Err(error),
+    }
+}
+
+
+#[cfg(test)]
+mod test_csv_to_parquet {
+    use super::*;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn should_convert_csv_to_parquet() {
+        // Create a temporary CSV file with valid data
+        let mut input_file = NamedTempFile::new().unwrap();
+        let csv_data = "id,name\n1,Alice\n2,Bob";
+        write!(input_file, "{}", csv_data).unwrap();
+
+        let output_file = NamedTempFile::new().unwrap();
+
+        let options = Options {
+            input: input_file.path().to_path_buf(),
+            output: output_file.path().to_path_buf(),
+            schema_file: None,
+            max_read_records: None,
+            header: Some(true),
+            delimiter: ',',
+            compression: None,
+            encoding: None,
+            data_pagesize_limit: None,
+            dictionary_pagesize_limit: None,
+            write_batch_size: None,
+            max_row_group_size: None,
+            created_by: None,
+            dictionary: false,
+            statistics: None,
+            print_schema: false,
+            dry: false,
+        };
+
+        csv_to_parquet(options).unwrap();
+
+        let output_file_size = output_file.path().metadata().expect("Failed to get file metadata").len();
+        assert!(output_file_size > 0, "Output file is empty");
+
+        let output_file_handle = File::open(output_file.path()).expect("Failed to open output file");
+        let builder = ParquetRecordBatchReaderBuilder::try_new(output_file_handle).expect("Failed to create ParquetRecordBatchReaderBuilder");
+        let mut reader = builder.build().expect("Failed to build ParquetRecordBatchReader");
+        let output_content = reader.next().unwrap().expect("Failed to read record batch");
+        assert_eq!(output_content.num_rows(), 2, "Number of rows in output file is incorrect");
+        assert_eq!(output_content.column(0).as_any().downcast_ref::<arrow::array::Int64Array>().unwrap().values(), &[1, 2]);
+        assert_eq!(output_content.column(1).as_any().downcast_ref::<arrow::array::StringArray>().unwrap().value(0), "Alice");
+        assert_eq!(output_content.column(1).as_any().downcast_ref::<arrow::array::StringArray>().unwrap().value(1), "Bob");
     }
 }
