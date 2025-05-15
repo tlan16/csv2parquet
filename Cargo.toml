@@ -1,7 +1,7 @@
 [package]
 name = "csv2parquet"
-version = "0.6.1"
-authors = ["Dominik Moritz <domoritz@cmu.edu>"]
+version = "0.6.2"
+authors = ["Frank Lan <franklan118@gmail.com>", "Dominik Moritz <domoritz@cmu.edu>"]
 license = "MIT/Apache-2.0"
 edition = "2018"
 repository = "https://github.com/domoritz/csv2parquet"
