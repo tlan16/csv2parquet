@@ -8,28 +8,22 @@ if [[ -z "$CARGO_BUILD_TARGET" ]]; then
   exit 1
 fi
 
-DOCKER_IMAGE_TAG="${DOCKER_IMAGE_TAG:-}"
-if [[ -z "$DOCKER_IMAGE_TAG" ]]; then
-  echo "DOCKER_IMAGE_TAG is not set. Please set according to https://github.com/rust-cross/rust-musl-cross"
-  exit 1
-fi
+function build_x86_64-pc-windows-gnu() {
+    cross build --release --target x86_64-pc-windows-gnu
+    upx --best --lzma target/x86_64-pc-windows-gnu/release/csv2parquet.exe
+}
 
-DOCKER_IMAGE="ghcr.io/rust-cross/rust-musl-cross:${DOCKER_IMAGE_TAG}"
+function build_aarch64-linux-android() {
+    cross build --release --target aarch64-linux-android
+    upx --best --lzma target/x86_64-pc-windows-gnu/release/csv2parquet.exe
+}
 
-# Build the project
-echo "Building the project for target: $CARGO_BUILD_TARGET"
-docker run \
-  --pull always \
-  --rm \
-  -v "$(pwd)":/home/rust/src \
-  -v "$HOME/.cargo/registry/":"/root/.cargo/registry/" \
-  -v "$HOME/.cargo/git/":"/root/.cargo/git/" \
-  "$DOCKER_IMAGE" \
-    cargo build --release
-
-APP_NAME="csv2parquet"
-mkdir -p dist
-BUILT_FILE="target/${CARGO_BUILD_TARGET}/release/${APP_NAME}"
-DIST_FILE="dist/${APP_NAME}-${CARGO_BUILD_TARGET}"
-cp -v "$BUILT_FILE" "$DIST_FILE"
-upx --best --lzma "$DIST_FILE"
+case $CARGO_BUILD_TARGET in
+x86_64-pc-windows-gnu)
+  build_x86_64-pc-windows-gnu
+  ;;
+  *)
+    echo "Invalid build target $CARGO_BUILD_TARGET"
+    exit 1
+    ;;
+esac
